@@ -1,9 +1,17 @@
-# for Linux
-OPENSSL_DIR=/usr
-# for Mac OS X with brew
-#OPENSSL_DIR=/usr/local/opt/openssl
-
 CC=cc
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	# Mac OS X detection
+	ifneq ($(wildcard /opt/homebrew/opt/openssl),)
+		OPENSSL_DIR=/opt/homebrew/opt/openssl
+	else
+		OPENSSL_DIR=/usr/local/opt/openssl
+	endif
+else
+	# Linux default
+	OPENSSL_DIR=/usr
+endif
 
 OPENSSL_INCLUDE_DIR=$(OPENSSL_DIR)/include
 OPENSSL_LIB_DIR=$(OPENSSL_DIR)/lib

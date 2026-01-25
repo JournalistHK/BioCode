@@ -53,9 +53,17 @@ PRINT_TIMER_FOOTER
 //     http://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Online_algorithm
 
 static uint64_t rdtsc(void) {
+#if defined(__aarch64__)
+	uint64_t val;
+	__asm__ volatile("mrs %0, cntvct_el0" : "=r" (val));
+	return val;
+#elif defined(__x86_64__) || defined(__i386__)
 	unsigned long long int x;
 	__asm__ volatile (".byte 0x0f, 0x31" : "=A" (x));
 	return x;
+#else
+	return 0; // Fallback for other architectures
+#endif
 }
 
 #define PRINT_BENCHMARK_INSTRUCTIONS \

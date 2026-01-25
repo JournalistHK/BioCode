@@ -30,6 +30,16 @@
 generate_a
 test
 
+# HSS LWE Module: Ignore build artifacts (whitelist source)
+hss_lwe/*
+!hss_lwe/*.c
+!hss_lwe/*.h
+!hss_lwe/Makefile
+!hss_lwe/*.png
+
 # Debug files
 *.dSYM/
 *.su
+
+
+GEMINI.md
