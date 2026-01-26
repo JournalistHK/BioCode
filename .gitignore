@@ -42,7 +42,7 @@ face_recognition/*
 !face_recognition/*.c
 !face_recognition/*.h
 !face_recognition/Makefile
-
+!face_recognition/*.png
 
 # Debug files
 *.dSYM/

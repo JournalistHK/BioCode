@@ -1,94 +1,42 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <math.h> // for fabs
 #include "face_api.h"
+#include "csv_reader.h"
 
-// 引用之前的真实数据 (为了节省篇幅，这里假设数据在外部定义或我会再次粘贴数据块)
-// 为了确保编译通过，我会重新粘贴完整的数据块
-// ==========================================
-// 真实人脸特征向量 (128-dim)
-// ==========================================
-const float face_A1[128] = {
-    -0.033628, 0.052825, 0.046969, -0.053148, -0.063259, 0.038481, -0.034638, -0.126442,
-    0.088321, -0.119780, 0.170258, -0.015241, -0.175020, -0.067332, -0.032903, 0.100588,
-    -0.129202, -0.100938, -0.091176, -0.048737, 0.038563, -0.012351, 0.024468, 0.036127,
-    -0.106432, -0.173822, -0.056073, -0.091871, 0.040003, -0.068305, 0.003254, 0.017770,
-    -0.124500, -0.095982, 0.051911, 0.035319, -0.036068, -0.026827, 0.198275, 0.007670,
-    -0.147255, 0.034504, 0.039016, 0.161099, 0.104279, 0.034371, -0.050511, -0.069970,
-    0.141528, -0.141935, 0.085810, 0.147986, 0.024466, 0.088899, 0.071815, -0.128795,
-    0.063162, 0.122841, -0.096336, -0.084897, 0.056804, -0.027137, -0.004184, -0.032120,
-    0.165084, -0.062130, 0.064293, 0.035307, 0.126048, -0.072895, 0.050361, -0.047537,
-    -0.110265, -0.211756, -0.219803, 0.033783, 0.222340, 0.113271, 0.120531, 0.134110,
-    -0.080063, 0.004990, -0.108221, -0.027056, 0.067339, 0.027384, -0.079234, -0.050800,
-    0.112423, -0.007525, 0.079632, 0.031264, 0.128738, 0.037416, -0.063548, 0.056637,
-    -0.067200, -0.026139, -0.061805, 0.024483, -0.042578, -0.036737, -0.013583, 0.123512,
-    -0.141380, 0.102685, 0.088647, -0.170668, 0.101734, -0.085022, 0.131752, -0.057395,
-    -0.038161, 0.069675, -0.095034, 0.020486, -0.098864, -0.061033, -0.143715, 0.057530,
-    -0.085870, 0.109015, -0.143372, 0.094590, 0.150931, 0.107779, 0.048342, 0.027042
-};
+// Path relative to execution directory (project root)
+#define DB_PATH "../feature_extraction/face_vectors.csv"
 
-const float face_A2[128] = {
-    -0.044810, 0.050017, 0.062024, -0.063529, -0.065840, 0.036111, -0.030587, -0.120059,
-    0.092120, -0.108605, 0.165421, -0.012584, -0.168234, -0.078432, -0.040212, 0.092345,
-    -0.135678, -0.105421, -0.098765, -0.042134, 0.045672, -0.015678, 0.021023, 0.040123,
-    -0.110234, -0.175432, -0.050213, -0.088765, 0.035678, -0.065432, 0.001234, 0.021345,
-    -0.120456, -0.100234, 0.048765, 0.038765, -0.032145, -0.022345, 0.201234, 0.005678,
-    -0.142345, 0.038765, 0.042345, 0.158765, 0.108765, 0.030213, -0.055678, -0.065432,
-    0.145678, -0.138765, 0.080123, 0.150234, 0.020123, 0.085432, 0.068765, -0.125678,
-    0.060123, 0.125678, -0.100234, -0.080123, 0.052345, -0.022345, -0.001234, -0.035678,
-    0.160123, -0.065432, 0.060123, 0.038765, 0.120123, -0.075432, 0.055678, -0.042345,
-    -0.115678, -0.205432, -0.215432, 0.038765, 0.225432, 0.110123, 0.115678, 0.130123,
-    -0.085678, 0.001234, -0.105432, -0.022345, 0.070123, 0.030213, -0.075432, -0.055678,
-    0.108765, -0.002345, 0.082345, 0.035678, 0.125678, 0.040123, -0.060123, 0.060123,
-    -0.060123, -0.030213, -0.065432, 0.020123, -0.045678, -0.032145, -0.010123, 0.120123,
-    -0.145678, 0.105432, 0.085432, -0.175432, 0.105432, -0.080123, 0.135678, -0.052345,
-    -0.032145, 0.072345, -0.090123, 0.025678, -0.095432, -0.065432, -0.140123, 0.060123,
-    -0.080123, 0.115678, -0.140123, 0.090123, 0.155678, 0.110123, 0.042345, 0.030213
-};
-
-const float face_B[128] = {
-    0.056345, -0.023456, 0.123456, 0.012345, -0.098765, -0.054321, 0.012345, 0.087654,
-    -0.123456, 0.045678, -0.065432, 0.098765, 0.023456, 0.109876, 0.054321, -0.087654,
-    0.076543, 0.012345, 0.134567, 0.056789, -0.098765, 0.043210, -0.021098, -0.109876,
-    0.034567, 0.065432, 0.012345, 0.087654, -0.054321, 0.098765, -0.023456, -0.076543,
-    0.109876, 0.054321, -0.032109, -0.065432, 0.087654, 0.012345, -0.134567, -0.045678,
-    0.065432, -0.023456, -0.054321, -0.098765, -0.087654, -0.012345, 0.076543, 0.045678,
-    -0.109876, 0.034567, -0.065432, -0.134567, -0.012345, -0.076543, -0.098765, 0.087654,
-    -0.054321, -0.123456, 0.065432, 0.056789, -0.021098, 0.043210, 0.034567, 0.012345,
-    -0.087654, 0.065432, -0.054321, -0.023456, -0.098765, 0.076543, -0.043210, 0.034567,
-    0.134567, 0.098765, 0.087654, -0.021098, -0.123456, -0.056789, -0.045678, -0.109876,
-    0.065432, -0.012345, 0.076543, 0.023456, -0.034567, -0.054321, 0.076543, 0.087654,
-    -0.098765, 0.012345, -0.065432, -0.045678, -0.134567, -0.021098, 0.043210, -0.065432,
-    0.054321, 0.034567, 0.065432, -0.012345, 0.098765, 0.056789, 0.012345, -0.123456,
-    0.087654, -0.065432, -0.076543, 0.134567, -0.054321, 0.076543, -0.098765, 0.043210,
-    0.034567, -0.087654, 0.065432, -0.023456, 0.076543, 0.056789, 0.098765, -0.054321,
-    0.087654, -0.098765, 0.123456, -0.076543, -0.134567, -0.087654, -0.034567, -0.021098
-};
-
-
-void test_pair(const char* label, const float* face1, const float* face2) {
+void test_pair(const char* label, const float* face_x, const float* face_y) {
     printf("\n=== Testing %s ===\n", label);
     
     // 1. Setup Environment
     HSS_CRS crs;
     face_auth_setup(&crs);
     
-    // 2. Client Side: Prepare Query
-    EncryptedFaceQuery query;
-    face_client_prepare_query(&crs, face1, &query);
-    printf("[Client] Query encrypted.\n");
+    // 2. Client (Bob) Step 1: Prepare Query x
+    FaceQueryPacket1 client_packet1;
+    ClientState client_state;
+    face_client_step1_prepare(&crs, face_x, &client_packet1, &client_state);
+    printf("[Client/Bob] Step 1: Query x prepared and encrypted.\n");
     
-    // 3. Server Side: Prepare DB Entry
-    EncryptedFaceDB db_entry;
-    face_server_prepare_db(&crs, face2, &db_entry);
-    printf("[Server] DB Entry encrypted.\n");
+    // 3. Server (Alice) Step 1: Process Query x with y
+    FaceServerPacket1 server_packet;
+    ServerState server_state;
+    face_server_step1_process(&crs, face_y, &client_packet1, &server_packet, &server_state);
+    printf("[Server/Alice] Step 1: Query processed against y. Shares prepared.\n");
     
-    // 4. Compute Similarity (Securely)
-    float score = face_secure_compare(&crs, &query, &db_entry);
-    printf("Computed Similarity Score: %.6f\n", score);
+    // 4. Client (Bob) Step 2: Finalize Share z_B
+    FaceQueryPacket2 client_packet2;
+    face_client_step2_compute(&crs, &server_packet, &client_state, &client_packet2);
+    printf("[Client/Bob] Step 2: Response share z_B computed.\n");
     
-    // 5. Decision
-    if (face_is_match(score)) {
+    // 5. Server (Alice) Step 2: Decide
+    int match = face_server_step2_decide(&client_packet2, &server_state);
+    
+    // 6. Output Verdict
+    if (match) {
         printf("Verdict: MATCH (Access Granted)\n");
     } else {
         printf("Verdict: NO MATCH (Access Denied)\n");
@@ -96,11 +44,45 @@ void test_pair(const char* label, const float* face1, const float* face2) {
 }
 
 int main() {
-    printf("Secure Face Authentication Demo\n");
-    printf("Architecture: Separated Face API Layer over NIM Core\n");
-    
-    test_pair("Identity Check: Alice vs Alice (New Photo)", face_A1, face_A2);
-    test_pair("Identity Check: Alice vs Bob (Imposter)", face_A1, face_B);
+    printf("Secure Face Authentication Demo (Cosine Similarity Algorithm)\n");
+    printf("Roles: Bob (Client) has x, Alice (Server) has y\n");
+    printf("Loading database from %s...\n", DB_PATH);
+
+    // 1. Load DB
+    int db_count = 0;
+    FaceRecord* db = load_face_db(DB_PATH, &db_count);
+    if (!db || db_count == 0) {
+        fprintf(stderr, "Error: Failed to load database or database empty.\n");
+        return 1;
+    }
+
+    // 2. Select Test Candidates
+    const FaceRecord* bush_imgs[2] = {NULL, NULL};
+    const FaceRecord* powell_imgs[1] = {NULL};
+
+    int bush_found = find_faces_by_identity(db, db_count, "George_W_Bush", bush_imgs, 2);
+    int powell_found = find_faces_by_identity(db, db_count, "Colin_Powell", powell_imgs, 1);
+
+    if (bush_found < 2 || powell_found < 1) {
+        fprintf(stderr, "Error: Could not find enough images for Bush (%d/2) or Powell (%d/1).\n", bush_found, powell_found);
+        free(db);
+        return 1;
+    }
+
+    printf("Selected:\n");
+    printf(" - Bush 1: %s\n", bush_imgs[0]->filename);
+    printf(" - Bush 2: %s\n", bush_imgs[1]->filename);
+    printf(" - Powell: %s\n", powell_imgs[0]->filename);
+
+    // 3. Run Tests
+    // Test 1: Same Person (Bush 1 vs Bush 2)
+    test_pair("Identity Check: Bush vs Bush (Same Person)", bush_imgs[0]->vector, bush_imgs[1]->vector);
+
+    // Test 2: Imposter (Powell vs Bush 1)
+    test_pair("Identity Check: Powell vs Bush (Imposter)", powell_imgs[0]->vector, bush_imgs[0]->vector);
+
+    // 4. Cleanup
+    free(db);
     
     return 0;
 }
