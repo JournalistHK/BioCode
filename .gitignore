@@ -31,15 +31,23 @@ generate_a
 test
 
 # HSS LWE Module: Ignore build artifacts (whitelist source)
-hss_lwe/*
-!hss_lwe/*.c
-!hss_lwe/*.h
-!hss_lwe/Makefile
-!hss_lwe/*.png
+hss_core/*
+!hss_core/*.c
+!hss_core/*.h
+!hss_core/Makefile
+!hss_core/*.png
+
+# face_recognition
+face_recognition/*
+!face_recognition/*.c
+!face_recognition/*.h
+!face_recognition/Makefile
+
 
 # Debug files
 *.dSYM/
 *.su
 
-
+archive
+feature_extraction/dataset
 GEMINI.md
