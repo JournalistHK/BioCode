@@ -44,6 +44,13 @@ face_recognition/*
 !face_recognition/Makefile
 !face_recognition/*.png
 
+# benchmark
+benchmark/*
+!benchmark/*.c
+!benchmark/*.py
+!benchmark/*.h
+!benchmark/Makefile
+
 # Debug files
 *.dSYM/
 *.su
