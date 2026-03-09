@@ -40,27 +40,30 @@ static void gen_matrix_mul(hss_int_t *out_result, const hss_int_t *in_vec, int r
     EVP_CIPHER_CTX *ctx;
     int len;
     if(!(ctx = EVP_CIPHER_CTX_new())) handleErrors();
-    if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_128_ecb(), NULL, seed, NULL)) handleErrors();
+    
+    // Switch to AES-128-CTR for significantly faster sequential pseudo-random generation
+    uint8_t iv[16] = {0};
+    if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_128_ctr(), NULL, seed, iv)) handleErrors();
     EVP_CIPHER_CTX_set_padding(ctx, 0);
 
     memset(out_result, 0, (transpose ? cols : rows) * sizeof(hss_int_t));
-    uint8_t aes_in[16];
-    uint8_t aes_out[16];
 
     // We generate one 128-bit element per AES block for simplicity with __int128
-    // This is slower than packing, but ensures we fill the large type.
+    // Optimized: Using AES-CTR to encrypt a zero buffer is equivalent to PRNG streaming.
+    #define MAX_COLS 640 // Maximum dimension in HSS configuration (HSS_K = 640)
+    if (cols > MAX_COLS) handleErrors();
+
+    static const uint8_t zero_in[MAX_COLS * 16] = {0};
+    uint8_t aes_out[MAX_COLS * 16];
     
     for (int i = 0; i < rows; i++) {
+        // Encrypt zeros to get the CTR keystream
+        if(1 != EVP_EncryptUpdate(ctx, aes_out, &len, zero_in, cols * 16)) handleErrors();
+
+        // Process the generated AES stream to compute the inner product
         for (int j = 0; j < cols; j++) {
-            // Encode i, j into AES input block
-            memset(aes_in, 0, 16);
-            aes_in[0] = i & 0xFF; aes_in[1] = (i>>8) & 0xFF; aes_in[2] = (i>>16) & 0xFF;
-            aes_in[4] = j & 0xFF; aes_in[5] = (j>>8) & 0xFF; aes_in[6] = (j>>16) & 0xFF;
-            
-            if(1 != EVP_EncryptUpdate(ctx, aes_out, &len, aes_in, 16)) handleErrors();
-            
             hss_int_t a_ij;
-            memcpy(&a_ij, aes_out, 16);
+            memcpy(&a_ij, aes_out + j * 16, 16);
             a_ij &= HSS_Q_MASK;
             
             if (!transpose) {
