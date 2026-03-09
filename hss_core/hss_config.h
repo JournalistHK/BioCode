@@ -34,7 +34,9 @@ typedef unsigned __int128 hss_int_t;
 
 // Scaling factor for Face Vectors (Float -> Int)
 // 2^16 = 65536.0 used for converting input floats to integers
+#ifndef HSS_SCALE
 #define HSS_SCALE 65536.0
+#endif
 
 // Noise Parameters
 #define HSS_NOISE_ETA 2

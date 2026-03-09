@@ -51,6 +51,13 @@ benchmark/*
 !benchmark/*.h
 !benchmark/Makefile
 
+# tests
+tests/precision_test/*
+!tests/precision_test/*.c
+!tests/precision_test/*.h
+!tests/precision_test/*.sh
+!tests/precision_test/*.md
+
 # Debug files
 *.dSYM/
 *.su
