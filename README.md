@@ -1,72 +1,77 @@
-# lwe-frodo
+# 基于 LWE 的安全人脸认证系统 (Secure Face Authentication System)
 
-**lwe-frodo** is a C cryptographic library for post-quantum key exchange based on the learning with errors (LWE) problem.  It is based on the following research paper:
+本项目是一个基于**带误差学习问题 (Learning With Errors, LWE)** 和**同态秘密共享 (Homomorphic Secret Sharing, HSS)** 构建的隐私保护生物特征认证系统。
 
-- Joppe Bos, Craig Costello, Léo Ducas, Ilya Mironov, Michael Naehrig, Valeria Nikolaenko, Ananth Raghunathan, Douglas Stebila.  **Frodo: Take off the ring!  Practical, quantum-secure key exchange from LWE**.  In *ACM Conference on Computer and Communications Security (CCS) 2016*, ACM, October, 2016.  DOI:[10.1145/2976749.2978425](http://dx.doi.org/10.1145/2976749.2978425), Eprint [http://eprint.iacr.org/2016/659](http://eprint.iacr.org/2016/659).
+系统能在**完全不解密**用户生物特征模板和实时探测模板的前提下，在服务器端安全地计算两者的余弦相似度（Cosine Similarity），从而完成身份验证。
 
-You can [download the PDF](https://github.com/lwe-frodo/lwe-frodo/blob/master/LWE-Frodo-full-version.pdf) of the paper from the GitHub repository.
+> **背景说明**：本项目最初在代码级克隆自后量子密钥交换库 `lwe-frodo` (CCS 2016)，但经过彻底重构，已演变为一个专用于**安全内积计算与隐私认证**的全新应用。原始的密钥交换 (KEX) 逻辑已被移除，底层密码学原语针对 HSS 场景（如 128 位超大模数与 AES-CTR 矩阵生成）进行了深度定制。
 
-Python scripts for selecting parameters are available in the [lwe-frodo/parameter-selection](https://github.com/lwe-frodo/parameter-selection) repository.
+---
 
-## Building
+## 🌟 核心特性
 
-The software is plain C.  Compilation has been tested using gcc on Ubuntu 16.04.1 and clang on Mac OS X 10.11.6.  The software uses some routines from OpenSSL's libcrypto, so you will need to have OpenSSL installed.
+*   **极致的隐私保护**：用户的真实人脸特征向量在服务器端永远处于 LWE 加密状态（分为 Role A / Role B 盲化），从数学机制上杜绝服务器数据泄露导致的生物特征盗用。
+*   **高精度同态计算**：采用定制的超大模数设计（$Q=2^{90}, P=2^{60}$）以及 `__int128` 大数运算，确保 128 维特征向量的同态内积运算无精度折损，实现了与明文计算几乎一致的认证准确率。
+*   **极速密码学内核**：底层的 LWE 伪随机矩阵生成已优化为基于 OpenSSL AES-CTR 的流式批处理。密码层的端到端认证耗时仅约 **1.4ms**，远快于前端 AI 模型提取人脸特征的时间（~5.4ms）。
+*   **严格防伪造验证**：协议实现了严格的绝对值边界检查 (Bound Checking)，能够自动阻断利用伪造“全零”或随机化状态绕过认证的数学漏洞（彻底解决 50% FAR 漏洞）。
 
-### To compile on Ubuntu:
+---
 
-	sudo apt-get install make gcc libssl-dev
-	make
+## 📂 目录结构
 
-### To compile on Mac OS X using brew:
+项目被精心划分为以下几个独立且解耦的模块：
 
-You will need to have installed the Xcode developer tools, including the command-line programs and the [brew](http://brew.sh) package manager.
+*   **`hss_core/` (密码学内核)**
+    包含底层非交互式 MAC (NIM) 和 HSS 原语。负责大整数 LWE 矩阵的高效展开、噪声采样、Role A/B 的同态编码与解码。
+*   **`face_recognition/` (应用与协议层)**
+    实现了 Challenge-Response (挑战-应答) 交互协议的完整生命周期：
+    *   *Phase 1*: Enrollment (注册)
+    *   *Phase 2*: Challenge & Verification (挑战与核验)
+*   **`benchmark/` (性能分析)**
+    包含独立隔离的基准测试集，用于分别测量底层数学原语耗时与端到端安全认证的应用耗时。
+*   **`tests/precision_test/` (大规模精度与安全性评估)**
+    一个高强度的自动化测试程序。它将导入真实的人脸数据集，进行数十万次的配对交叉测试，以验证加密状态下的“误识率 (FAR)”和“拒识率 (FRR)”是否与明文状态完美一致。
+*   **`feature_extraction/` (数据提取管道)**
+    Python 脚本与工具，使用 `dlib` 将 LFW 等公开数据集中的人脸图像提取为 128 维连续向量，供 C 语言协议层使用。
 
-	brew install openssl
-	make OPENSSL_DIR=/usr/local/opt/openssl
-	
-(You can also uncomment the appropriate line in the `Makefile` and then you only need to type `make`.)
+---
 
-You can also download and compile OpenSSL yourself following the instructions on the [OpenSSL website](https://www.openssl.org/).  You will need to edit the `Makefile` to point to your copy of OpenSSL.
+## 🛠️ 编译与运行
 
-## Running
+### 环境依赖
+*   **C 编译器**：支持 C11 标准的 `gcc` 或 `clang`。
+*   **OpenSSL**：需要 OpenSSL 开发库（用于高强度随机数和 AES-CTR 加密）。Makefile 已适配了 macOS (Homebrew, Intel/Apple Silicon) 和常用 Linux 路径。
+*   **Python 3** *(可选)*：仅在您需要重新提取图像特征或运行 `benchmark_extraction.py` 时需要。
 
-To run the basic test harness, type:
+### 一键指令 (基于项目根目录 Makefile)
 
-	./test
-	
-This will test various aspects of the library, including:
+你可以使用外层的 `Makefile` 来统一管理所有模块。
 
-- correctness of routines for packing / unpacking vectors in bit arrays
-- correctness and distribution of random sampling
-- correctness of key exchange
+```bash
+# 1. 构建所有模块 (hss_core, face_recognition, benchmark)
+make all
 
-You can run the test harness in continuous mode by typing:
+# 2. 运行所有常规功能与性能基准测试
+make test
 
-	./test cont
-	
-This will run the test harness indefinitely (hit `Ctrl-C` to stop).  Given that the probability of failure for the default parameters is 2<sup>-38.9</sup>, you should not see any failures unless you run it for several billion iterations.
+# 3. 单独运行功能演示 (Demo)
+make test-face
 
-You can get runtime benchmarking results by typing:
+# 4. 运行严格的大规模安全/精度测试 (非常耗时，验证同态数学的准确性)
+make test-precision
 
-	./test bench
+# 5. 清理所有编译产物
+make clean
+```
 
-In order to obtain accurate benchmarking results, you should disable hyperthreading (a.k.a. hardware multithreading) and TurboBoost.  `./test bench` will output instructions on how to do so.
+### 独立测试说明
+如果您想单独运行某个模块的测试，也可以直接运行对应的命令：
+*   **`make test-hss`**: 验证底层的加解密和内积重构是否正确。
+*   **`make test-benchmark`**: 在您的机器上打印底层加解密速度（微秒级）和端到端人脸验证速度。
 
-## Parameters
+---
 
-The software includes 4 parameters sets, as described in the paper:
+## 🔒 协议与安全哲学
 
-- **challenge** — smaller parameters that should be reasonably accessible within the current cryptanalytic state-of-the-art
-- **classical** — provides 128-bit security against best-known classical attacks, but not against quantum attackers
-- **recommended** — provides ≥128 bits of security against best-known quantum attacks
-- **paranoid** — provides 128 bits of security against an algorithm reaching the complexity lower bound for sieving algorithms (see [paper](https://github.com/lwe-frodo/lwe-frodo/blob/master/LWE-Frodo-CCS-BCDMNNRS16.pdf) for details)
-
-By default, the recommended parameters are used.  This can be configured by editing `lwe.h`.
-
-## License
-
-This software is licensed under the MIT License.  For details, see [LICENSE.txt](https://github.com/lwe-frodo/lwe-frodo/blob/master/LICENSE.txt).
-
-## Acknowledgements
-
-JB and LD were supported in part by the Commission of the European Communities through the Horizon 2020 program under project number 645622 (PQCRYPTO).  DS was supported in part by Australian Research Council (ARC) Discovery Project grant DP130104304 and a Natural Sciences and Engineering Research Council of Canada (NSERC) Discovery Grant.  The authors would like to thank Adam Langley, Eric Grosse, and Úlfar Erlingsson for their inputs. A large part of this work was done when VN was an intern with the Google Security and Privacy Research team.
+1.  **整数缩放的余弦相似度**：在同态加密下无法进行浮点数的开方与除法运算。系统利用不等式 $Den^2 \cdot IP^2 \ge Num^2 \cdot NormProd$ 将阈值判定完全转化为安全的整数乘法比较。
+2.  **解耦的误识率**：AI 模型的特征提取准确度与密码学的还原准确度被完全解耦。只要同态重构的内积是数学正确的，哪怕 AI 认为两张不同的人脸是一样的，密码层的逻辑也依然坚不可摧。

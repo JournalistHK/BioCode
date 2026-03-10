@@ -1,36 +1,45 @@
-CC=cc
+.PHONY: all clean hss face_recognition benchmark test test-hss test-face test-benchmark test-precision
 
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-	# Mac OS X detection
-	ifneq ($(wildcard /opt/homebrew/opt/openssl),)
-		OPENSSL_DIR=/opt/homebrew/opt/openssl
-	else
-		OPENSSL_DIR=/usr/local/opt/openssl
-	endif
-else
-	# Linux default
-	OPENSSL_DIR=/usr
-endif
+# 默认构建三个核心模块
+all: hss face_recognition benchmark
 
-OPENSSL_INCLUDE_DIR=$(OPENSSL_DIR)/include
-OPENSSL_LIB_DIR=$(OPENSSL_DIR)/lib
+# --- 单独构建各个模块 ---
+hss:
+	$(MAKE) -C hss_core
 
-CFLAGS=-O3 -std=gnu11 -Wall -Wextra -I$(OPENSSL_INCLUDE_DIR) #-DDEBUG_LOGS
-LDFLAGS=-L$(OPENSSL_LIB_DIR) -lcrypto -lssl -lm
+face_recognition:
+	$(MAKE) -C face_recognition
 
-all:
-	$(CC) $(CFLAGS) -o generate_a generate_a.c $(LDFLAGS) 
-	$(CC) $(CFLAGS) -c lwekex.c
-	$(CC) $(CFLAGS) -o test test.c lwekex.o $(LDFLAGS) 
+benchmark:
+	$(MAKE) -C benchmark
 
-test: all
-	./test
+# --- 单独运行各个模块的测试/演示 ---
+test-hss: hss
+	@echo "\n=== Running HSS Core Tests ==="
+	cd hss_core && ./hss_nim_test
 
+test-face: face_recognition
+	@echo "\n=== Running Face Recognition Demo ==="
+	cd face_recognition && ./face_auth_demo
+
+test-benchmark: benchmark
+	@echo "\n=== Running Benchmarks ==="
+	cd benchmark && ./nim_benchmark
+	cd benchmark && ./face_benchmark
+
+# 整体进行测试 (仅包含功能和性能基准)
+test: test-hss test-face test-benchmark
+
+# --- 独立的大规模精度与安全评估测试 ---
+# 精度测试单独拿出来，因为它通常非常耗时且性质不同
+test-precision: all
+	@echo "\n=== Running Precision & Validation Tests ==="
+	cd tests/precision_test && ./run_test.sh
+
+# --- 清理所有构建产物 ---
 clean:
-	rm -f *.o
-	rm -f generate_a
-	rm -f test
-
-prettyprint:
-	astyle --style=java --indent=tab --pad-header --pad-oper --align-pointer=name --align-reference=name --suffix=none *.c *.h
+	$(MAKE) -C hss_core clean
+	$(MAKE) -C face_recognition clean
+	$(MAKE) -C benchmark clean
+	rm -f tests/precision_test/test_precision
+	rm -f tests/precision_test/*.o
