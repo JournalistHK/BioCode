@@ -96,12 +96,15 @@ int main() {
         int encrypted_match = face_auth_verify(&response, &verify_state);
         
         // Reconstruct inner product to compute Cryptographic Cosine Similarity
-        hss_int_t res_dot_mod = hss_reconstruct(verify_state.z_S, response.z_U);
+        hss_int_t res_dot_mod = hss_reconstruct(verify_state.z_S_vec, response.z_U_vec);
         int64_t val_dot = my_from_mod_p(res_dot_mod);
         
+        hss_int_t res_norm_mod = hss_reconstruct(verify_state.z_S_norm, response.z_U_norm);
+        int64_t val_norm_prod = my_from_mod_p(res_norm_mod);
+        
         double crypto_sim = 0.0;
-        if (verify_state.ref_norm_sq > 0 && verify_state.prb_norm_sq > 0) {
-            crypto_sim = (double)val_dot / sqrt((double)verify_state.ref_norm_sq * (double)verify_state.prb_norm_sq);
+        if (val_norm_prod > 0) {
+            crypto_sim = (double)val_dot / sqrt((double)val_norm_prod * pow(2.0, 2.0 * NORM_TRUNC_BITS));
         }
         
         // Compute Error

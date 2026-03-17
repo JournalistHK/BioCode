@@ -49,11 +49,15 @@ void face_auth_enroll(const HSS_CRS *crs,
         sum_sq += (uint64_t)(val_q * val_q); 
     }
     
-    // Store norm squared as plaintext
-    c_ref_out->ref_norm_sq = sum_sq;
-    
     // Encode Vector
     hss_encode_B(crs, x_encoded, &c_ref_out->pub_vec, &witness_out->state_vec);
+    
+    // Encode Truncated Norm
+    // Pad norm to 128 dimensions (only first element matters, rest are 0)
+    hss_int_t norm_encoded[HSS_N] = {0};
+    uint64_t trunc_norm = sum_sq >> NORM_TRUNC_BITS;
+    norm_encoded[0] = to_mod_p(trunc_norm);
+    hss_encode_B(crs, norm_encoded, &c_ref_out->pub_norm, &witness_out->state_norm);
 }
 
 // Phase 2 - Step 1: Challenge (Server-side)
@@ -73,15 +77,20 @@ void face_auth_challenge(const HSS_CRS *crs,
         sum_sq += (uint64_t)(val_q * val_q);
     }
     
-    // Server saves norms locally
-    verify_state_out->ref_norm_sq = c_ref->ref_norm_sq;
-    verify_state_out->prb_norm_sq = sum_sq;
-    
     // Encode Vector (Generate PubA)
     hss_encode_A(crs, y_lifted, &c_prb_out->pub_vec, &verify_state_out->state_vec);
     
     // Compute Server's Partial Share (z_A)
-    verify_state_out->z_S = hss_decode_A(crs, &c_ref->pub_vec, &verify_state_out->state_vec);
+    verify_state_out->z_S_vec = hss_decode_A(crs, &c_ref->pub_vec, &verify_state_out->state_vec);
+    
+    // Encode Truncated Norm (Generate PubA for norm)
+    hss_int_t norm_lifted[HSS_N] = {0};
+    uint64_t trunc_norm = sum_sq >> NORM_TRUNC_BITS;
+    norm_lifted[0] = to_mod_q_centered(trunc_norm);
+    hss_encode_A(crs, norm_lifted, &c_prb_out->pub_norm, &verify_state_out->state_norm);
+    
+    // Compute Server's Partial Share for Norm
+    verify_state_out->z_S_norm = hss_decode_A(crs, &c_ref->pub_norm, &verify_state_out->state_norm);
 }
 
 // Phase 2 - Step 2: Response (User-side)
@@ -91,7 +100,8 @@ void face_auth_respond(const HSS_CRS *crs,
                        const Auth_Witness *witness,
                        Auth_Response *response_out)
 {
-    response_out->z_U = hss_decode_B(crs, &c_prb->pub_vec, &witness->state_vec);
+    response_out->z_U_vec = hss_decode_B(crs, &c_prb->pub_vec, &witness->state_vec);
+    response_out->z_U_norm = hss_decode_B(crs, &c_prb->pub_norm, &witness->state_norm);
 }
 
 // Phase 2 - Step 3: Verify (Server-side)
@@ -100,8 +110,12 @@ int face_auth_verify(const Auth_Response *response,
                      const Auth_ServerVerifyState *verify_state)
 {
     // 1. Reconstruct Inner Product (in Z_P)
-    hss_int_t res_dot_mod = hss_reconstruct(verify_state->z_S, response->z_U);
+    hss_int_t res_dot_mod = hss_reconstruct(verify_state->z_S_vec, response->z_U_vec);
     int64_t val_dot = from_mod_p(res_dot_mod);
+    
+    // 2. Reconstruct Norm Product
+    hss_int_t res_norm_mod = hss_reconstruct(verify_state->z_S_norm, response->z_U_norm);
+    int64_t val_norm_prod = from_mod_p(res_norm_mod);
     
     // ==========================================
     // SECURITY PATCH: Bound/Range Checking
@@ -113,14 +127,22 @@ int face_auth_verify(const Auth_Response *response,
         return 0; // Fail immediately
     }
     
-    // 2. Check Sign Condition (c1): IP(x, y) > 0
+    if (val_norm_prod <= 0) {
+        // Unlikely to happen for real norms unless forgery is involved,
+        // or extreme negative noise, but norm prod should be highly positive.
+        return 0;
+    }
+    
+    // 3. Check Sign Condition (c1): IP(x, y) > 0
     if (val_dot <= 0) {
         return 0; // Fail
     }
     
-    // 3. Check Scaled Cosine Condition (c2)
+    // 4. Check Scaled Cosine Condition (c2)
     unsigned __int128 ip_sq = (unsigned __int128)val_dot * (unsigned __int128)val_dot;
-    unsigned __int128 norm_prod = (unsigned __int128)verify_state->ref_norm_sq * (unsigned __int128)verify_state->prb_norm_sq; 
+    
+    // Shift the norm_prod back up by 2*NORM_TRUNC_BITS to get the original scale.
+    unsigned __int128 norm_prod = (unsigned __int128)val_norm_prod << (2 * NORM_TRUNC_BITS);
     
     unsigned __int128 lhs = (unsigned __int128)(FACE_TAU_DEN * FACE_TAU_DEN) * ip_sq;
     unsigned __int128 rhs = (unsigned __int128)(FACE_TAU_NUM * FACE_TAU_NUM) * norm_prod;
