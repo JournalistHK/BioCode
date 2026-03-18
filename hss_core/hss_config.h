@@ -4,12 +4,18 @@
 #include <stdint.h>
 
 // ==========================================
-// Dimensions
+// Dimensions (Configurable for RLWE)
 // ==========================================
 
+// N is the degree of the polynomial ring R_q = Z_q[x] / (x^N + 1)
+// Standard values: 128, 256, 512, 1024
+#ifndef HSS_N
 #define HSS_N 128
-#define HSS_T 128
-#define HSS_K 640
+#endif
+
+// In RLWE-based HSS for inner product, the expansion factor K is no longer needed.
+// We operate directly in the ring of degree N.
+#define HSS_D HSS_N
 
 // ==========================================
 // Moduli & Parameters (128-bit Arithmetic)

@@ -17,6 +17,7 @@ static hss_int_t to_mod_p(int64_t val) {
 }
 
 static hss_int_t to_mod_q_centered(int64_t val) {
+    // For R-LWE, we treat it as an unsigned value in [0, Q-1]
     return (hss_int_t)(val & HSS_Q_MASK);
 }
 
@@ -49,11 +50,10 @@ void face_auth_enroll(const HSS_CRS *crs,
         sum_sq += (uint64_t)(val_q * val_q); 
     }
     
-    // Encode Vector
+    // RLWE Encode Vector (Reference y in R-LWE Fig 4 is encoded into B)
     hss_encode_B(crs, x_encoded, &c_ref_out->pub_vec, &witness_out->state_vec);
     
     // Encode Truncated Norm
-    // Pad norm to 128 dimensions (only first element matters, rest are 0)
     hss_int_t norm_encoded[HSS_N] = {0};
     uint64_t trunc_norm = sum_sq >> NORM_TRUNC_BITS;
     norm_encoded[0] = to_mod_p(trunc_norm);
@@ -77,13 +77,13 @@ void face_auth_challenge(const HSS_CRS *crs,
         sum_sq += (uint64_t)(val_q * val_q);
     }
     
-    // Encode Vector (Generate PubA)
+    // RLWE Encode Vector (Probe x in R-LWE Fig 4 is encoded into A)
     hss_encode_A(crs, y_lifted, &c_prb_out->pub_vec, &verify_state_out->state_vec);
     
     // Compute Server's Partial Share (z_A)
     verify_state_out->z_S_vec = hss_decode_A(crs, &c_ref->pub_vec, &verify_state_out->state_vec);
     
-    // Encode Truncated Norm (Generate PubA for norm)
+    // Encode Truncated Norm
     hss_int_t norm_lifted[HSS_N] = {0};
     uint64_t trunc_norm = sum_sq >> NORM_TRUNC_BITS;
     norm_lifted[0] = to_mod_q_centered(trunc_norm);

@@ -1,7 +1,9 @@
 #ifndef CSV_READER_H
 #define CSV_READER_H
 
-#define FACE_VECTOR_DIM 128
+#include "../hss_core/hss_config.h"
+
+#define FACE_VECTOR_DIM HSS_N
 #define MAX_IDENTITY_LEN 64
 #define MAX_FILENAME_LEN 64
 

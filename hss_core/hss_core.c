@@ -11,8 +11,54 @@ void handleErrors(void) {
 }
 
 // ==========================================
-// Internal Helpers
+// RLWE Math Primitives
 // ==========================================
+
+// Polynomial multiplication over R_q = Z_q[x] / (x^N + 1)
+// Complexity: O(N^2) - Efficient for N=128, 256
+void poly_mul(const HSS_Poly *a, const HSS_Poly *b, HSS_Poly *res) {
+    hss_int_t temp[2 * HSS_N] = {0};
+    
+    // 1. Standard polynomial multiplication (Convolution)
+    for (int i = 0; i < HSS_N; i++) {
+        for (int j = 0; j < HSS_N; j++) {
+            hss_int_t prod = (a->coeffs[i] * b->coeffs[j]) & HSS_Q_MASK;
+            temp[i + j] = (temp[i + j] + prod) & HSS_Q_MASK;
+        }
+    }
+    
+    // 2. Reduce modulo (x^N + 1)
+    // x^N = -1 (mod q), so x^{N+k} = -x^k
+    for (int i = 0; i < HSS_N; i++) {
+        hss_int_t high = temp[i + HSS_N];
+        // res[i] = temp[i] - temp[i+N]
+        if (temp[i] >= high) {
+            res->coeffs[i] = (temp[i] - high) & HSS_Q_MASK;
+        } else {
+            res->coeffs[i] = (HSS_Q - (high - temp[i])) & HSS_Q_MASK;
+        }
+    }
+}
+
+// Generates a random polynomial from a seed using AES-CTR as PRNG
+void poly_expand(HSS_Poly *p, const uint8_t *seed) {
+    EVP_CIPHER_CTX *ctx;
+    int len;
+    if(!(ctx = EVP_CIPHER_CTX_new())) handleErrors();
+    
+    uint8_t iv[16] = {0};
+    if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_128_ctr(), NULL, seed, iv)) handleErrors();
+    
+    uint8_t zero_in[16] = {0};
+    uint8_t aes_out[16];
+    
+    for (int i = 0; i < HSS_N; i++) {
+        if(1 != EVP_EncryptUpdate(ctx, aes_out, &len, zero_in, 16)) handleErrors();
+        memcpy(&p->coeffs[i], aes_out, 16);
+        p->coeffs[i] &= HSS_Q_MASK;
+    }
+    EVP_CIPHER_CTX_free(ctx);
+}
 
 static hss_int_t sample_noise() {
     uint8_t bytes[4]; 
@@ -27,61 +73,28 @@ static hss_int_t sample_noise() {
     return (hss_int_t)val;
 }
 
+static void sample_poly_noise(HSS_Poly *p) {
+    for(int i=0; i<HSS_N; i++) {
+        p->coeffs[i] = sample_noise();
+    }
+}
+
 static hss_int_t sample_uniform_q() {
-    uint8_t bytes[16]; // 128 bits
+    uint8_t bytes[16];
     RAND_bytes(bytes, 16);
     hss_int_t val = 0;
     memcpy(&val, bytes, 16);
     return val & HSS_Q_MASK;
 }
 
-// Generates Matrix (Rows x Cols) and computes Mat * Vec
-static void gen_matrix_mul(hss_int_t *out_result, const hss_int_t *in_vec, int rows, int cols, const uint8_t *seed, int transpose) {
-    EVP_CIPHER_CTX *ctx;
-    int len;
-    if(!(ctx = EVP_CIPHER_CTX_new())) handleErrors();
-    
-    // Switch to AES-128-CTR for significantly faster sequential pseudo-random generation
-    uint8_t iv[16] = {0};
-    if(1 != EVP_EncryptInit_ex(ctx, EVP_aes_128_ctr(), NULL, seed, iv)) handleErrors();
-    EVP_CIPHER_CTX_set_padding(ctx, 0);
-
-    memset(out_result, 0, (transpose ? cols : rows) * sizeof(hss_int_t));
-
-    // We generate one 128-bit element per AES block for simplicity with __int128
-    // Optimized: Using AES-CTR to encrypt a zero buffer is equivalent to PRNG streaming.
-    #define MAX_COLS 640 // Maximum dimension in HSS configuration (HSS_K = 640)
-    if (cols > MAX_COLS) handleErrors();
-
-    static const uint8_t zero_in[MAX_COLS * 16] = {0};
-    uint8_t aes_out[MAX_COLS * 16];
-    
-    for (int i = 0; i < rows; i++) {
-        // Encrypt zeros to get the CTR keystream
-        if(1 != EVP_EncryptUpdate(ctx, aes_out, &len, zero_in, cols * 16)) handleErrors();
-
-        // Process the generated AES stream to compute the inner product
-        for (int j = 0; j < cols; j++) {
-            hss_int_t a_ij;
-            memcpy(&a_ij, aes_out + j * 16, 16);
-            a_ij &= HSS_Q_MASK;
-            
-            if (!transpose) {
-                // out[i] += A[i,j] * in[j]
-                hss_int_t prod = (a_ij * in_vec[j]) & HSS_Q_MASK;
-                out_result[i] = (out_result[i] + prod) & HSS_Q_MASK;
-            } else {
-                // out[j] += A[i,j] * in[i]
-                hss_int_t prod = (a_ij * in_vec[i]) & HSS_Q_MASK;
-                out_result[j] = (out_result[j] + prod) & HSS_Q_MASK;
-            }
-        }
+static void sample_poly_uniform(HSS_Poly *p) {
+    for(int i=0; i<HSS_N; i++) {
+        p->coeffs[i] = sample_uniform_q();
     }
-    EVP_CIPHER_CTX_free(ctx);
 }
 
 // ==========================================
-// Public API Implementation
+// HSS Protocol Implementation
 // ==========================================
 
 void hss_setup(HSS_CRS *crs) {
@@ -89,100 +102,90 @@ void hss_setup(HSS_CRS *crs) {
     if(!RAND_bytes(crs->seed_B, 16)) handleErrors();
 }
 
-// --- Role A (Alice) ---
+// --- Role A (Hasher) ---
 
-void hss_encode_A(const HSS_CRS *crs, const hss_int_t *x_lifted, HSS_PubA *pe_A, HSS_StateA *st_A) {
-    // 1. Store State (x)
-    memcpy(st_A->x, x_lifted, HSS_N * sizeof(hss_int_t));
-
-    // 2. Generate Random u and Store in State
-    for(int i=0; i<HSS_T; i++) {
-        st_A->u[i] = sample_noise();
-    }
-
-    // 3. Compute pe_A (digest d) = A*x + B*u
-    hss_int_t Ax[HSS_K];
-    hss_int_t Bu[HSS_K];
+void hss_encode_A(const HSS_CRS *crs, const hss_int_t *x_raw, HSS_PubA *pe_A, HSS_StateA *st_A) {
+    // 1. Prepare poly_x = sum x_i * z^i
+    for(int i=0; i<HSS_N; i++) st_A->poly_x.coeffs[i] = x_raw[i];
     
-    gen_matrix_mul(Ax, st_A->x, HSS_K, HSS_N, crs->seed_A, 0);
-    gen_matrix_mul(Bu, st_A->u, HSS_K, HSS_T, crs->seed_B, 0);
+    // 2. Generate secret mask poly_u
+    sample_poly_noise(&st_A->poly_u);
     
-    for(int i=0; i<HSS_K; i++) {
-        pe_A->vec_d[i] = (Ax[i] + Bu[i]) & HSS_Q_MASK;
+    // 3. d(x) = A(x)*x(x) + B(x)*u(x)
+    HSS_Poly poly_A, poly_B;
+    poly_expand(&poly_A, crs->seed_A);
+    poly_expand(&poly_B, crs->seed_B);
+    
+    HSS_Poly Ax, Bu;
+    poly_mul(&poly_A, &st_A->poly_x, &Ax);
+    poly_mul(&poly_B, &st_A->poly_u, &Bu);
+    
+    for(int i=0; i<HSS_N; i++) {
+        pe_A->poly_d.coeffs[i] = (Ax.coeffs[i] + Bu.coeffs[i]) & HSS_Q_MASK;
     }
 }
 
 hss_int_t hss_decode_A(const HSS_CRS *crs, const HSS_PubB *pe_B, const HSS_StateA *st_A) {
-    hss_int_t sum = 0;
+    // [[z]]0 = e(x)*x(x) + ep(x)*u(x)
+    HSS_Poly ex, epu;
+    poly_mul(&pe_B->poly_e, &st_A->poly_x, &ex);
+    poly_mul(&pe_B->poly_ep, &st_A->poly_u, &epu);
     
-    // e^T * x
-    for(int i=0; i<HSS_N; i++) {
-        hss_int_t prod = (pe_B->vec_e[i] * st_A->x[i]) & HSS_Q_MASK;
-        sum = (sum + prod) & HSS_Q_MASK;
-    }
+    // Extract inner product from the (N-1)-th coefficient
+    // Due to poly_y being reversed, the inner product is at index N-1
+    hss_int_t sum = (ex.coeffs[HSS_N-1] + epu.coeffs[HSS_N-1]) & HSS_Q_MASK;
     
-    // e'^T * u
-    for(int i=0; i<HSS_T; i++) {
-        hss_int_t prod = (pe_B->vec_ep[i] * st_A->u[i]) & HSS_Q_MASK;
-        sum = (sum + prod) & HSS_Q_MASK;
-    }
-    
-    // Rounding
     return (sum + (HSS_DELTA / 2)) / HSS_DELTA;
 }
 
-// --- Role B (Bob) ---
+// --- Role B (Encryptor) ---
 
-void hss_encode_B(const HSS_CRS *crs, const hss_int_t *y_encoded, HSS_PubB *pe_B, HSS_StateB *st_B) {
-    // 1. Generate Secret w
-    for(int i=0; i<HSS_K; i++) {
-        st_B->w[i] = sample_uniform_q();
+void hss_encode_B(const HSS_CRS *crs, const hss_int_t *y_raw, HSS_PubB *pe_B, HSS_StateB *st_B) {
+    // 1. Generate secret w(x)
+    sample_poly_uniform(&st_B->poly_w);
+    
+    // 2. Prepare poly_y = sum y_i * z^{N-1-i} (REVERSED)
+    // This trick ensures that poly_x * poly_y has the inner product at index N-1
+    HSS_Poly poly_y_scaled = {0};
+    for(int i=0; i<HSS_N; i++) {
+        poly_y_scaled.coeffs[HSS_N - 1 - i] = (y_raw[i] * HSS_DELTA) & HSS_Q_MASK;
     }
     
-    // 2. Compute e = A^T * w + chi + Delta * y
-    hss_int_t ATw[HSS_N];
-    gen_matrix_mul(ATw, st_B->w, HSS_K, HSS_N, crs->seed_A, 1); // Transpose
+    // 3. e(x) = A(x)*w(x) + chi(x) + Delta*y(x)
+    HSS_Poly poly_A, poly_B;
+    poly_expand(&poly_A, crs->seed_A);
+    poly_expand(&poly_B, crs->seed_B);
+    
+    HSS_Poly Aw, Bw;
+    poly_mul(&poly_A, &st_B->poly_w, &Aw);
+    poly_mul(&poly_B, &st_B->poly_w, &Bw);
+    
+    HSS_Poly noise1, noise2;
+    sample_poly_noise(&noise1);
+    sample_poly_noise(&noise2);
     
     for(int i=0; i<HSS_N; i++) {
-        hss_int_t noise = sample_noise();
-        hss_int_t msg_scaled = (y_encoded[i] * HSS_DELTA) & HSS_Q_MASK;
-        pe_B->vec_e[i] = (ATw[i] + noise + msg_scaled) & HSS_Q_MASK;
-    }
-    
-    // 3. Compute e' = B^T * w + chi
-    hss_int_t BTw[HSS_T];
-    gen_matrix_mul(BTw, st_B->w, HSS_K, HSS_T, crs->seed_B, 1); // Transpose
-    
-    for(int i=0; i<HSS_T; i++) {
-        hss_int_t noise = sample_noise();
-        pe_B->vec_ep[i] = (BTw[i] + noise) & HSS_Q_MASK;
+        pe_B->poly_e.coeffs[i] = (Aw.coeffs[i] + noise1.coeffs[i] + poly_y_scaled.coeffs[i]) & HSS_Q_MASK;
+        pe_B->poly_ep.coeffs[i] = (Bw.coeffs[i] + noise2.coeffs[i]) & HSS_Q_MASK;
     }
 }
 
 hss_int_t hss_decode_B(const HSS_CRS *crs, const HSS_PubA *pe_A, const HSS_StateB *st_B) {
-    hss_int_t dot_prod = 0;
-    for(int i=0; i<HSS_K; i++) {
-        hss_int_t prod = (st_B->w[i] * pe_A->vec_d[i]) & HSS_Q_MASK;
-        dot_prod = (dot_prod + prod) & HSS_Q_MASK;
-    }
+    // [[z]]1 = d(x) * w(x)
+    HSS_Poly dw;
+    poly_mul(&pe_A->poly_d, &st_B->poly_w, &dw);
     
-    // Rounding
+    // Extract from index N-1
+    hss_int_t dot_prod = dw.coeffs[HSS_N-1];
+    
     return (dot_prod + (HSS_DELTA / 2)) / HSS_DELTA;
 }
 
-// --- Reconstruction ---
-
 hss_int_t hss_reconstruct(hss_int_t z_A, hss_int_t z_B) {
-    // We need signed arithmetic here.
-    // Since hss_int_t is unsigned 128-bit, and P is 60-bit.
-    // If z_A < z_B, the result should wrap modulo P.
-    
     if (z_A >= z_B) {
         return (z_A - z_B) % HSS_P;
     } else {
-        // z_A < z_B. Result is negative.
-        // In mod P: (z_A - z_B) = P - (z_B - z_A)
         hss_int_t diff = z_B - z_A;
-        return HSS_P - (diff % HSS_P); // If diff % P == 0, returns P which is 0 mod P.
+        return HSS_P - (diff % HSS_P);
     }
 }

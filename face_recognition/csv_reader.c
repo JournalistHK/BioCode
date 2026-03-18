@@ -3,7 +3,8 @@
 #include <string.h>
 #include "csv_reader.h"
 
-#define MAX_LINE_LEN 4096 // Enough for 128 floats + metadata
+// Increased buffer for larger N (e.g., 512, 1024)
+#define MAX_LINE_LEN (HSS_N * 48 + 512)
 
 FaceRecord* load_face_db(const char* csv_path, int *count) {
     FILE* file = fopen(csv_path, "r");
@@ -14,13 +15,19 @@ FaceRecord* load_face_db(const char* csv_path, int *count) {
 
     // 1. Count lines to allocate memory (first pass)
     int line_count = 0;
-    char buffer[MAX_LINE_LEN];
-    while (fgets(buffer, sizeof(buffer), file)) {
+    char *buffer = malloc(MAX_LINE_LEN);
+    if (!buffer) {
+        fclose(file);
+        return NULL;
+    }
+
+    while (fgets(buffer, MAX_LINE_LEN, file)) {
         line_count++;
     }
     
     // Check if empty or just header
     if (line_count <= 1) {
+        free(buffer);
         fclose(file);
         *count = 0;
         return NULL;
@@ -30,6 +37,7 @@ FaceRecord* load_face_db(const char* csv_path, int *count) {
     FaceRecord* db = (FaceRecord*)malloc(sizeof(FaceRecord) * data_count);
     if (!db) {
         perror("Failed to allocate memory for DB");
+        free(buffer);
         fclose(file);
         return NULL;
     }
@@ -38,14 +46,18 @@ FaceRecord* load_face_db(const char* csv_path, int *count) {
     rewind(file);
     
     // Skip header
-    if (!fgets(buffer, sizeof(buffer), file)) {
+    if (!fgets(buffer, MAX_LINE_LEN, file)) {
         free(db);
+        free(buffer);
         fclose(file);
         return NULL;
     }
 
     int idx = 0;
-    while (fgets(buffer, sizeof(buffer), file) && idx < data_count) {
+    while (fgets(buffer, MAX_LINE_LEN, file) && idx < data_count) {
+        // Clear vector first for zero-padding
+        memset(db[idx].vector, 0, sizeof(float) * FACE_VECTOR_DIM);
+
         // Parse Identity
         char* token = strtok(buffer, ",");
         if (!token) continue;
@@ -58,7 +70,7 @@ FaceRecord* load_face_db(const char* csv_path, int *count) {
         strncpy(db[idx].filename, token, MAX_FILENAME_LEN - 1);
         db[idx].filename[MAX_FILENAME_LEN - 1] = '\0';
 
-        // Parse Vectors (dim_0 to dim_127)
+        // Parse Vectors (up to FACE_VECTOR_DIM)
         int dim = 0;
         while (dim < FACE_VECTOR_DIM) {
             token = strtok(NULL, ",");
@@ -67,17 +79,16 @@ FaceRecord* load_face_db(const char* csv_path, int *count) {
             dim++;
         }
 
-        if (dim == FACE_VECTOR_DIM) {
+        // We accept records even if they have fewer dimensions (zero-padded above)
+        if (dim > 0) {
             idx++;
-        } else {
-            // Malformed line, skip or log?
-            // printf("Warning: Skipped malformed line %d\n", idx + 2);
         }
     }
 
+    free(buffer);
     fclose(file);
     *count = idx;
-    printf("Successfully loaded %d face records from %s\n", idx, csv_path);
+    printf("Successfully loaded %d face records from %s (Dim: %d, Ring Degree: %d)\n", idx, csv_path, idx > 0 ? (int)FACE_VECTOR_DIM : 0, HSS_N);
     return db;
 }
 

@@ -6,7 +6,7 @@
 #include "hss_core.h"
 
 // ==========================================
-// NIM Core Unit Test (128-bit Support)
+// RLWE NIM Core Unit Test
 // ==========================================
 
 // Helper to print __int128 in Hex
@@ -67,18 +67,13 @@ int64_t from_mod_p(hss_int_t val) {
     hss_int_t p_half = HSS_P / 2;
     if (val > p_half) {
         hss_int_t diff = HSS_P - val;
-        // Check if diff fits in int64
-        if (diff > 9223372036854775807ULL) { 
-            // Should not happen for valid inner products within range
-            return -1; 
-        }
         return -(int64_t)diff;
     }
     return (int64_t)val;
 }
 
-void run_verbose_nim_test() {
-    printf("\n--- Starting Verbose NIM Test ---\n");
+void run_verbose_rlwe_test() {
+    printf("\n--- Starting Verbose RLWE-HSS Test ---\n");
     
     HSS_CRS crs;
     hss_setup(&crs);
@@ -87,12 +82,12 @@ void run_verbose_nim_test() {
     // Inputs
     int32_t x_real[HSS_N];
     int32_t y_real[HSS_N];
-    hss_int_t x_lifted_q[HSS_N]; 
-    hss_int_t y_encoded_p[HSS_N]; 
+    hss_int_t x_raw[HSS_N]; 
+    hss_int_t y_raw[HSS_N]; 
     int64_t true_inner_product = 0;
 
     printf("[Input Generation]\n");
-    printf("  Generating inputs in range [-65536, 65536] to simulate real quantized vectors.\n");
+    printf("  Generating inputs in range [-65536, 65536] (Standard Quantization).\n");
     
     for(int i=0; i<HSS_N; i++) {
         int32_t val_x = (rand() % 131073) - 65536; 
@@ -103,33 +98,33 @@ void run_verbose_nim_test() {
         
         true_inner_product += ((int64_t)x_real[i] * y_real[i]);
         
-        x_lifted_q[i] = to_mod_q_centered(x_real[i]);
-        y_encoded_p[i] = to_mod_p(y_real[i]);
+        x_raw[i] = to_mod_q_centered(x_real[i]);
+        y_raw[i] = to_mod_p(y_real[i]);
     }
     
     print_vec_signed("  x (int32)", x_real, HSS_N);
-    print_vec_u128  ("  x (Z_Q)  ", x_lifted_q, HSS_N);
+    print_vec_u128  ("  x (Z_Q)  ", x_raw, HSS_N);
     print_vec_signed("  y (int32)", y_real, HSS_N);
-    print_vec_u128  ("  y (Z_P)  ", y_encoded_p, HSS_N);
+    print_vec_u128  ("  y (Z_P)  ", y_raw, HSS_N);
 
     printf("  Expected Inner Product: %lld\n", (long long)true_inner_product);
 
     // Hasher (Alice)
     HSS_PubA pe_A;
     HSS_StateA st_A;
-    hss_encode_A(&crs, x_lifted_q, &pe_A, &st_A);
+    hss_encode_A(&crs, x_raw, &pe_A, &st_A);
     
-    printf("\n[Alice Step 1] Encoded x -> Digest d\n");
-    print_vec_u128("  Digest d (Z_Q)", pe_A.vec_d, HSS_K);
+    printf("\n[Alice Step 1] RLWE Encode x -> Digest d(x)\n");
+    print_vec_u128("  Digest d(x) coeffs", pe_A.poly_d.coeffs, HSS_N);
     
     // Encryptor (Bob)
     HSS_PubB pe_B;
     HSS_StateB st_B;
-    hss_encode_B(&crs, y_encoded_p, &pe_B, &st_B);
+    hss_encode_B(&crs, y_raw, &pe_B, &st_B);
     
-    printf("\n[Bob Step 1] Encoded y -> Ciphertext (e, e')\n");
-    print_vec_u128("  Ctx e  (Z_Q)", pe_B.vec_e, HSS_N);
-    print_vec_u128("  Ctx e' (Z_Q)", pe_B.vec_ep, HSS_T);
+    printf("\n[Bob Step 1] RLWE Encode y -> Ciphertexts e(x), ep(x)\n");
+    print_vec_u128("  Ctx e(x)  coeffs", pe_B.poly_e.coeffs, HSS_N);
+    print_vec_u128("  Ctx ep(x) coeffs", pe_B.poly_ep.coeffs, HSS_N);
     
     // Cross Decode
     printf("\n[Cross Decode]\n");
@@ -159,11 +154,10 @@ void run_verbose_nim_test() {
 
 int main() {
     srand(time(NULL));
-    printf("=== NIM Core Unit Test (Verbose) ===\n");
-    // Hardcode display as config is complex type now
-    printf("Config: N=%d, K=%d, P=2^%d, Q=2^%d\n", HSS_N, HSS_K, HSS_LOG2_P, HSS_LOG2_Q);
+    printf("=== RLWE-HSS Core Unit Test (Verbose) ===\n");
+    printf("Config: N=%d (Ring Degree), P=2^%d, Q=2^%d\n", HSS_N, HSS_LOG2_P, HSS_LOG2_Q);
     
-    run_verbose_nim_test();
+    run_verbose_rlwe_test();
 
     return 0;
 }
