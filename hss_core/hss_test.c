@@ -73,7 +73,7 @@ int64_t from_mod_p(hss_int_t val) {
 }
 
 void run_verbose_rlwe_test() {
-    printf("\n--- Starting Verbose RLWE-HSS Test ---\n");
+    printf("\n--- Starting Verbose RLWE-NIM Test ---\n");
     
     HSS_CRS crs;
     hss_setup(&crs);
@@ -154,7 +154,7 @@ void run_verbose_rlwe_test() {
 
 int main() {
     srand(time(NULL));
-    printf("=== RLWE-HSS Core Unit Test (Verbose) ===\n");
+    printf("=== RLWE-NIM Core Unit Test (Verbose) ===\n");
     printf("Config: N=%d (Ring Degree), P=2^%d, Q=2^%d\n", HSS_N, HSS_LOG2_P, HSS_LOG2_Q);
     
     run_verbose_rlwe_test();
