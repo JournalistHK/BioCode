@@ -1,13 +1,28 @@
-CC = gcc
+CC ?= gcc
+PKG_CONFIG ?= pkg-config
 
-# OpenSSL Paths
-CFLAGS = -Wall -O2 -I. -I../hss_core -I../face_recognition \
-         -I/usr/local/opt/openssl/include \
-         -I/opt/homebrew/opt/openssl/include
+CFLAGS ?= -Wall -O2
+CPPFLAGS += -I. -I../hss_core -I../face_recognition
 
-LDFLAGS = -L/usr/local/opt/openssl/lib \
-          -L/opt/homebrew/opt/openssl/lib \
-          -lcrypto
+OPENSSL_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags openssl 2>/dev/null)
+OPENSSL_LIBS ?= $(shell $(PKG_CONFIG) --libs openssl 2>/dev/null)
+
+ifeq ($(strip $(OPENSSL_CFLAGS) $(OPENSSL_LIBS)),)
+OPENSSL_LIBS := -lcrypto
+
+ifneq ($(wildcard /usr/local/opt/openssl/include),)
+OPENSSL_CFLAGS += -I/usr/local/opt/openssl/include
+OPENSSL_LIBS += -L/usr/local/opt/openssl/lib
+endif
+
+ifneq ($(wildcard /opt/homebrew/opt/openssl/include),)
+OPENSSL_CFLAGS += -I/opt/homebrew/opt/openssl/include
+OPENSSL_LIBS += -L/opt/homebrew/opt/openssl/lib
+endif
+endif
+
+CPPFLAGS += $(OPENSSL_CFLAGS)
+LDLIBS += $(OPENSSL_LIBS) -lm
 
 # We depend on the object files from the sibling directories
 CORE_OBJ = ../hss_core/hss_core.o
@@ -17,16 +32,16 @@ CSV_READER_OBJ = ../face_recognition/csv_reader.o
 all: face_benchmark nim_benchmark
 
 face_benchmark: benchmark.o $(FACE_API_OBJ) $(CSV_READER_OBJ) $(CORE_OBJ)
-	$(CC) $(CFLAGS) -o face_benchmark benchmark.o $(FACE_API_OBJ) $(CSV_READER_OBJ) $(CORE_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o face_benchmark benchmark.o $(FACE_API_OBJ) $(CSV_READER_OBJ) $(CORE_OBJ) $(LDLIBS)
 
 nim_benchmark: benchmark_nim.o $(CORE_OBJ)
-	$(CC) $(CFLAGS) -o nim_benchmark benchmark_nim.o $(CORE_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o nim_benchmark benchmark_nim.o $(CORE_OBJ) $(LDLIBS)
 
 benchmark.o: benchmark.c
-	$(CC) $(CFLAGS) -c benchmark.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c benchmark.c
 
 benchmark_nim.o: benchmark_nim.c
-	$(CC) $(CFLAGS) -c benchmark_nim.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c benchmark_nim.c
 
 # Ensure dependencies are built
 $(CORE_OBJ):

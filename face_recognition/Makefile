@@ -1,13 +1,28 @@
-CC = gcc
+CC ?= gcc
+PKG_CONFIG ?= pkg-config
 
-# OpenSSL Paths
-CFLAGS = -Wall -O2 -I. -I../hss_core \
-         -I/usr/local/opt/openssl/include \
-         -I/opt/homebrew/opt/openssl/include
+CFLAGS ?= -Wall -O2
+CPPFLAGS += -I. -I../hss_core
 
-LDFLAGS = -L/usr/local/opt/openssl/lib \
-          -L/opt/homebrew/opt/openssl/lib \
-          -lcrypto
+OPENSSL_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags openssl 2>/dev/null)
+OPENSSL_LIBS ?= $(shell $(PKG_CONFIG) --libs openssl 2>/dev/null)
+
+ifeq ($(strip $(OPENSSL_CFLAGS) $(OPENSSL_LIBS)),)
+OPENSSL_LIBS := -lcrypto
+
+ifneq ($(wildcard /usr/local/opt/openssl/include),)
+OPENSSL_CFLAGS += -I/usr/local/opt/openssl/include
+OPENSSL_LIBS += -L/usr/local/opt/openssl/lib
+endif
+
+ifneq ($(wildcard /opt/homebrew/opt/openssl/include),)
+OPENSSL_CFLAGS += -I/opt/homebrew/opt/openssl/include
+OPENSSL_LIBS += -L/opt/homebrew/opt/openssl/lib
+endif
+endif
+
+CPPFLAGS += $(OPENSSL_CFLAGS)
+LDLIBS += $(OPENSSL_LIBS) -lm
 
 # We depend on the object file from the sibling directory
 CORE_OBJ = ../hss_core/hss_core.o
@@ -15,16 +30,16 @@ CORE_OBJ = ../hss_core/hss_core.o
 all: face_auth_demo
 
 face_auth_demo: face_api.o main.o csv_reader.o $(CORE_OBJ)
-	$(CC) $(CFLAGS) -o face_auth_demo face_api.o main.o csv_reader.o $(CORE_OBJ) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(CPPFLAGS) -o face_auth_demo face_api.o main.o csv_reader.o $(CORE_OBJ) $(LDLIBS)
 
 face_api.o: face_api.c face_api.h
-	$(CC) $(CFLAGS) -c face_api.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c face_api.c
 
 main.o: main.c face_api.h csv_reader.h
-	$(CC) $(CFLAGS) -c main.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c main.c
 
 csv_reader.o: csv_reader.c csv_reader.h
-	$(CC) $(CFLAGS) -c csv_reader.c
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c csv_reader.c
 
 # Ensure core object is built
 $(CORE_OBJ):
